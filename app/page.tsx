@@ -26,25 +26,6 @@ const prompts: Record<Stage, string> = {
   done: "好香的地瓜飯，你是最棒的小廚師！",
 };
 
-const voiceByText: Record<string, string> = {
-  "開始做地瓜飯！": "start",
-  [prompts.home]: "start",
-  [prompts.find]: "find",
-  [prompts.wash]: "wash",
-  [prompts.cut]: "cut",
-  [prompts.mix]: "mix",
-  [prompts.cook]: "cook",
-  [prompts.serve]: "serve",
-  [prompts.done]: "done",
-  "三條地瓜都找到啦！": "found3",
-  "洗得亮晶晶！": "washDone",
-  "切好了，變成小方塊！": "cutDone",
-  "白飯進鍋！": "rice",
-  "地瓜進鍋！": "potato",
-  "三、二、一，地瓜飯快快熟！": "cookStart",
-  "叮！地瓜飯煮好囉！": "cookDone",
-};
-
 let activeVoice: HTMLAudioElement | null = null;
 
 function deviceSpeech(text: string) {
@@ -67,31 +48,27 @@ function deviceSpeech(text: string) {
   engine.speak(line);
 }
 
-function voiceKey(text: string) {
-  if (voiceByText[text]) return voiceByText[text];
-  if (text.startsWith("找到第1條")) return "found1";
-  if (text.startsWith("找到第2條")) return "found2";
-  if (text.includes("還有2刀")) return "cut1";
-  if (text.includes("還有1刀")) return "cut2";
-  if (text.includes("說，好香")) return "guest";
-  return null;
-}
-
 function speak(text: string, enabled = true) {
   if (!enabled || typeof window === "undefined") return;
-  const key = voiceKey(text);
-  if (!key) {
-    deviceSpeech(text);
-    return;
-  }
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   activeVoice?.pause();
-  const audio = new Audio(`/voice/${key}.mp3`);
+
+  const naturalVoiceUrl =
+    `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=zh-TW&q=${encodeURIComponent(text)}`;
+  const audio = new Audio(naturalVoiceUrl);
   audio.preload = "auto";
   audio.setAttribute("playsinline", "");
+  audio.setAttribute("referrerpolicy", "no-referrer");
   audio.volume = 1;
   activeVoice = audio;
-  void audio.play().catch(() => deviceSpeech(text));
+  let fellBack = false;
+  const fallbackOnce = () => {
+    if (fellBack) return;
+    fellBack = true;
+    deviceSpeech(text);
+  };
+  audio.addEventListener("error", fallbackOnce, { once: true });
+  void audio.play().catch(fallbackOnce);
 }
 
 function Potato({ clean = false, tiny = false }: { clean?: boolean; tiny?: boolean }) {
