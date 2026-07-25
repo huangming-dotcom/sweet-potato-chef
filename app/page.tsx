@@ -28,12 +28,22 @@ const prompts: Record<Stage, string> = {
 
 function speak(text: string, enabled = true) {
   if (!enabled || typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
+  const engine = window.speechSynthesis;
+  engine.cancel();
+  engine.resume();
   const line = new SpeechSynthesisUtterance(text);
-  line.lang = "zh-TW";
+  const voices = engine.getVoices();
+  const voice =
+    voices.find(item => item.lang.toLowerCase() === "zh-tw") ||
+    voices.find(item => item.lang.toLowerCase() === "zh-hk") ||
+    voices.find(item => item.lang.toLowerCase() === "zh-cn") ||
+    voices.find(item => item.lang.toLowerCase().startsWith("zh"));
+  if (voice) line.voice = voice;
+  line.lang = voice?.lang || "zh-TW";
+  line.volume = 1;
   line.rate = 0.84;
   line.pitch = 1.12;
-  window.speechSynthesis.speak(line);
+  engine.speak(line);
 }
 
 function Potato({ clean = false, tiny = false }: { clean?: boolean; tiny?: boolean }) {
@@ -65,7 +75,18 @@ export default function Home() {
   const [guest, setGuest] = useState("");
   const washing = useRef(false);
   const washPoint = useRef({ x: 0, y: 0 });
-  const cutStart = useRef<{ line: number; y: number } | null>(null);
+  const cutStart = useRef<{ x: number; y: number } | null>(null);
+  const audioContext = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    }
+    return () => {
+      if ("speechSynthesis" in window) window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (stage === "home") return;
@@ -73,12 +94,20 @@ export default function Home() {
     return () => clearTimeout(id);
   }, [stage, sound]);
 
-  function ping(win = false) {
-    if (!sound) return;
+  function unlockSound() {
+    if (!sound) return null;
     const AudioCtx = window.AudioContext ||
       (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
+    if (!AudioCtx) return null;
+    if (!audioContext.current) audioContext.current = new AudioCtx();
+    const ctx = audioContext.current;
+    if (ctx.state === "suspended") void ctx.resume();
+    return ctx;
+  }
+
+  function ping(win = false) {
+    const ctx = unlockSound();
+    if (!ctx) return;
     (win ? [523, 659, 784] : [659]).forEach((hz, index) => {
       const tone = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -126,7 +155,7 @@ export default function Home() {
     );
     if (distance < 5) return;
     washPoint.current = { x: event.clientX, y: event.clientY };
-    const next = Math.min(100, washed + distance * 0.24);
+    const next = Math.min(100, washed + distance * 0.35);
     setWashed(next);
     if (Math.floor(next / 20) > Math.floor(washed / 20)) ping();
     if (next >= 100) {
@@ -140,16 +169,17 @@ export default function Home() {
     washing.current = false;
   }
 
-  function startCut(event: ReactPointerEvent<HTMLButtonElement>, line: number) {
-    if (line !== cut) return;
-    cutStart.current = { line, y: event.clientY };
+  function startCut(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    cutStart.current = { x: event.clientX, y: event.clientY };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
-  function finishCut(event: ReactPointerEvent<HTMLButtonElement>, line: number) {
+  function finishCut(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
     const start = cutStart.current;
     cutStart.current = null;
-    if (!start || start.line !== line || Math.abs(event.clientY - start.y) < 55) return;
+    if (!start || Math.hypot(event.clientX - start.x, event.clientY - start.y) < 32) return;
     const next = Math.min(cut + 1, 3);
     setCut(next);
     ping();
@@ -189,7 +219,7 @@ export default function Home() {
   const step = stages.indexOf(stage);
 
   return (
-    <main className={`game ${stage}`}>
+    <main className={`game ${stage}`} onPointerDownCapture={unlockSound}>
       <header>
         <div className="logo"><span>🍠</span> 地瓜飯小廚師</div>
         <button
@@ -222,7 +252,11 @@ export default function Home() {
             <div className="mascot"><span className="hat">☁</span><Potato clean /></div>
             <h1>地瓜飯<br />小廚師</h1>
             <p>找一找・洗一洗・煮香香</p>
-            <button className="big start" onClick={() => go("find")}>▶ 開始玩</button>
+            <button className="big start" onClick={() => {
+              unlockSound();
+              speak("開始做地瓜飯！", sound);
+              go("find");
+            }}>▶ 開始玩</button>
           </div>
         )}
 
@@ -280,19 +314,23 @@ export default function Home() {
           <div className="scene cut-scene">
             <div className="board">
               {cut < 3 ? (
-                <div className="cut-potato" aria-label={`已完成 ${cut} 刀`}>
+                <div
+                  className="cut-potato"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`在地瓜上滑動切塊，已完成 ${cut} 刀`}
+                  onPointerDown={startCut}
+                  onPointerUp={finishCut}
+                  onPointerCancel={() => { cutStart.current = null; }}
+                >
                   <div className="cut-flesh" />
                   {[0,1,2].map(line => (
-                    <button
+                    <span
                       key={line}
                       className={`cut-track line-${line} ${line < cut ? "sliced" : line === cut ? "active" : "waiting"}`}
-                      aria-label={line === cut ? `沿著第${line + 1}條虛線往下切` : `第${line + 1}條切線`}
-                      onPointerDown={event => startCut(event, line)}
-                      onPointerUp={event => finishCut(event, line)}
-                      onPointerCancel={() => { cutStart.current = null; }}
                     >
                       {line === cut && <span className="finger-guide">👇</span>}
-                    </button>
+                    </span>
                   ))}
                 </div>
               ) : (
@@ -301,7 +339,7 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <p className="hint">{cut < 3 ? `👇 沿著亮亮的虛線往下滑（${cut}/3）` : "地瓜變成方塊啦！"}</p>
+            <p className="hint">{cut < 3 ? `👇 在地瓜上往下滑（${cut}/3）` : "地瓜變成方塊啦！"}</p>
             <strong className="safe">小朋友不碰真的刀子喔！</strong>
           </div>
         )}
