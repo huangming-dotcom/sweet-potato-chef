@@ -26,8 +26,29 @@ const prompts: Record<Stage, string> = {
   done: "好香的地瓜飯，你是最棒的小廚師！",
 };
 
-function speak(text: string, enabled = true) {
-  if (!enabled || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+const voiceByText: Record<string, string> = {
+  "開始做地瓜飯！": "start",
+  [prompts.home]: "start",
+  [prompts.find]: "find",
+  [prompts.wash]: "wash",
+  [prompts.cut]: "cut",
+  [prompts.mix]: "mix",
+  [prompts.cook]: "cook",
+  [prompts.serve]: "serve",
+  [prompts.done]: "done",
+  "三條地瓜都找到啦！": "found3",
+  "洗得亮晶晶！": "washDone",
+  "切好了，變成小方塊！": "cutDone",
+  "白飯進鍋！": "rice",
+  "地瓜進鍋！": "potato",
+  "三、二、一，地瓜飯快快熟！": "cookStart",
+  "叮！地瓜飯煮好囉！": "cookDone",
+};
+
+let activeVoice: HTMLAudioElement | null = null;
+
+function deviceSpeech(text: string) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   const engine = window.speechSynthesis;
   engine.cancel();
   engine.resume();
@@ -44,6 +65,33 @@ function speak(text: string, enabled = true) {
   line.rate = 0.84;
   line.pitch = 1.12;
   engine.speak(line);
+}
+
+function voiceKey(text: string) {
+  if (voiceByText[text]) return voiceByText[text];
+  if (text.startsWith("找到第1條")) return "found1";
+  if (text.startsWith("找到第2條")) return "found2";
+  if (text.includes("還有2刀")) return "cut1";
+  if (text.includes("還有1刀")) return "cut2";
+  if (text.includes("說，好香")) return "guest";
+  return null;
+}
+
+function speak(text: string, enabled = true) {
+  if (!enabled || typeof window === "undefined") return;
+  const key = voiceKey(text);
+  if (!key) {
+    deviceSpeech(text);
+    return;
+  }
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  activeVoice?.pause();
+  const audio = new Audio(`/voice/${key}.mp3`);
+  audio.preload = "auto";
+  audio.setAttribute("playsinline", "");
+  audio.volume = 1;
+  activeVoice = audio;
+  void audio.play().catch(() => deviceSpeech(text));
 }
 
 function Potato({ clean = false, tiny = false }: { clean?: boolean; tiny?: boolean }) {
@@ -229,7 +277,10 @@ export default function Home() {
             const next = !sound;
             setSound(next);
             if (next) setTimeout(() => speak(prompts[stage]), 30);
-            else window.speechSynthesis?.cancel();
+            else {
+              activeVoice?.pause();
+              window.speechSynthesis?.cancel();
+            }
           }}
         >{sound ? "🔊" : "🔇"}</button>
       </header>
