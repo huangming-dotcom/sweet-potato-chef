@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 type Stage = "home" | "find" | "wash" | "cut" | "mix" | "cook" | "serve" | "done";
 
@@ -18,8 +18,8 @@ const titles: Record<Stage, string> = {
 const prompts: Record<Stage, string> = {
   home: "歡迎來到地瓜飯小廚師，按下開始玩。",
   find: "找一找，三條地瓜藏在哪裡？",
-  wash: "點點地瓜五下，把泥巴洗乾淨。",
-  cut: "拍拍地瓜，請大人幫忙變成小塊。",
+  wash: "用手指在地瓜上來回搓一搓，把泥巴洗乾淨。",
+  cut: "用手指沿著虛線往下切，把地瓜切成小方塊。",
   mix: "把白飯和地瓜都放進鍋子裡。",
   cook: "按下大大的煮飯按鈕。",
   serve: "選一位客人，請他吃地瓜飯。",
@@ -46,6 +46,14 @@ function Potato({ clean = false, tiny = false }: { clean?: boolean; tiny?: boole
   );
 }
 
+function PotatoCube({ index = 0 }: { index?: number }) {
+  return (
+    <span className={`potato-cube cube-${index % 4}`} aria-hidden="true">
+      <i className="cube-shine" />
+    </span>
+  );
+}
+
 export default function Home() {
   const [stage, setStage] = useState<Stage>("home");
   const [sound, setSound] = useState(true);
@@ -55,6 +63,9 @@ export default function Home() {
   const [food, setFood] = useState<string[]>([]);
   const [timer, setTimer] = useState(3);
   const [guest, setGuest] = useState("");
+  const washing = useRef(false);
+  const washPoint = useRef({ x: 0, y: 0 });
+  const cutStart = useRef<{ line: number; y: number } | null>(null);
 
   useEffect(() => {
     if (stage === "home") return;
@@ -101,21 +112,50 @@ export default function Home() {
     if (next.length === 3) setTimeout(() => go("wash"), 800);
   }
 
-  function washPotato() {
-    const next = Math.min(washed + 1, 5);
-    setWashed(next); ping();
-    if (next === 5) {
+  function startWash(event: ReactPointerEvent<HTMLDivElement>) {
+    washing.current = true;
+    washPoint.current = { x: event.clientX, y: event.clientY };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveWash(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!washing.current || washed >= 100) return;
+    const distance = Math.hypot(
+      event.clientX - washPoint.current.x,
+      event.clientY - washPoint.current.y,
+    );
+    if (distance < 5) return;
+    washPoint.current = { x: event.clientX, y: event.clientY };
+    const next = Math.min(100, washed + distance * 0.24);
+    setWashed(next);
+    if (Math.floor(next / 20) > Math.floor(washed / 20)) ping();
+    if (next >= 100) {
+      washing.current = false;
       speak("洗得亮晶晶！", sound);
-      setTimeout(() => go("cut"), 750);
+      setTimeout(() => go("cut"), 900);
     }
   }
 
-  function cutPotato() {
-    const next = Math.min(cut + 1, 4);
-    setCut(next); ping();
-    if (next === 4) {
-      speak("地瓜變成小塊了！", sound);
-      setTimeout(() => go("mix"), 750);
+  function stopWash() {
+    washing.current = false;
+  }
+
+  function startCut(event: ReactPointerEvent<HTMLButtonElement>, line: number) {
+    if (line !== cut) return;
+    cutStart.current = { line, y: event.clientY };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function finishCut(event: ReactPointerEvent<HTMLButtonElement>, line: number) {
+    const start = cutStart.current;
+    cutStart.current = null;
+    if (!start || start.line !== line || Math.abs(event.clientY - start.y) < 55) return;
+    const next = Math.min(cut + 1, 3);
+    setCut(next);
+    ping();
+    speak(next === 3 ? "切好了，變成小方塊！" : `切一刀！還有${3 - next}刀。`, sound);
+    if (next === 3) {
+      setTimeout(() => go("mix"), 1200);
     }
   }
 
@@ -212,24 +252,56 @@ export default function Home() {
         {stage === "wash" && (
           <div className="scene wash-scene">
             <span className="faucet">🚰</span><i className="water" />
-            <button className="target" aria-label="點地瓜清洗" onClick={washPotato}>
-              <Potato clean={washed === 5} />
-              {washed < 5 && Array.from({ length: washed }).map((_, i) => <i className={`bubble b${i}`} key={i}>○</i>)}
-            </button>
-            <div className="meter">{[0,1,2,3,4].map(i => <i className={i < washed ? "on" : ""} key={i}>●</i>)}</div>
-            <p className="hint">點地瓜 5 下</p>
+            <div
+              className="wash-zone"
+              role="slider"
+              aria-label="用手指搓洗地瓜"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(washed)}
+              onPointerDown={startWash}
+              onPointerMove={moveWash}
+              onPointerUp={stopWash}
+              onPointerCancel={stopWash}
+            >
+              <Potato clean={washed >= 100} />
+              <i className="wash-mud mud-a" style={{ opacity: Math.max(0, 1 - washed / 34) }} />
+              <i className="wash-mud mud-b" style={{ opacity: Math.max(0, 1 - washed / 62) }} />
+              <i className="wash-mud mud-c" style={{ opacity: Math.max(0, 1 - washed / 94) }} />
+              <span className="sponge">🧽</span>
+              {[0,1,2,3].map(i => <i className={`bubble b${i}`} key={i}>○</i>)}
+            </div>
+            <div className="wash-progress" aria-hidden="true"><i style={{ width: `${washed}%` }} /></div>
+            <p className="hint">👆 按住地瓜，來回搓洗</p>
           </div>
         )}
 
         {stage === "cut" && (
           <div className="scene cut-scene">
             <div className="board">
-              <button className="target" aria-label="拍拍地瓜變成小塊" onClick={cutPotato}>
-                {cut === 0 ? <Potato clean /> :
-                  <span className="pieces">{Array.from({length: cut + 1}).map((_,i) => <Potato clean tiny key={i} />)}</span>}
-              </button>
+              {cut < 3 ? (
+                <div className="cut-potato" aria-label={`已完成 ${cut} 刀`}>
+                  <div className="cut-flesh" />
+                  {[0,1,2].map(line => (
+                    <button
+                      key={line}
+                      className={`cut-track line-${line} ${line < cut ? "sliced" : line === cut ? "active" : "waiting"}`}
+                      aria-label={line === cut ? `沿著第${line + 1}條虛線往下切` : `第${line + 1}條切線`}
+                      onPointerDown={event => startCut(event, line)}
+                      onPointerUp={event => finishCut(event, line)}
+                      onPointerCancel={() => { cutStart.current = null; }}
+                    >
+                      {line === cut && <span className="finger-guide">👇</span>}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="cube-pile">
+                  {Array.from({ length: 8 }).map((_, index) => <PotatoCube index={index} key={index} />)}
+                </div>
+              )}
             </div>
-            <p className="hint">拍拍地瓜，請大人幫忙切</p>
+            <p className="hint">{cut < 3 ? `👇 沿著亮亮的虛線往下滑（${cut}/3）` : "地瓜變成方塊啦！"}</p>
             <strong className="safe">小朋友不碰真的刀子喔！</strong>
           </div>
         )}
