@@ -2,14 +2,20 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
-type Stage = "home" | "choose" | "order" | "find" | "wash" | "cut" | "rinse" | "mix" | "cook" | "serve" | "done";
+type Stage = "home" | "choose" | "order" | "find" | "wash" | "cut" | "rinse" | "mix" | "cook" | "decorate" | "serve" | "done";
 type Recipe = { id: string; name: string; color: string; sticker: string };
+type Topping = { id: string; name: string; emoji: string };
 
-const stages: Stage[] = ["choose", "order", "find", "wash", "cut", "rinse", "mix", "cook", "serve"];
+const stages: Stage[] = ["choose", "order", "find", "wash", "cut", "rinse", "mix", "cook", "decorate", "serve"];
 const recipes: Recipe[] = [
   { id: "gold", name: "黃金地瓜", color: "#f1a33f", sticker: "🌟" },
   { id: "purple", name: "紫心地瓜", color: "#8552a1", sticker: "💜" },
   { id: "orange", name: "紅心地瓜", color: "#ed7041", sticker: "🧡" },
+];
+const toppings: Topping[] = [
+  { id: "corn", name: "玉米", emoji: "🌽" },
+  { id: "carrot", name: "紅蘿蔔", emoji: "🥕" },
+  { id: "mushroom", name: "香菇", emoji: "🍄" },
 ];
 const titles: Record<Stage, string> = {
   home: "地瓜飯小廚師",
@@ -21,6 +27,7 @@ const titles: Record<Stage, string> = {
   rinse: "洗白米",
   mix: "放進鍋",
   cook: "煮飯飯",
+  decorate: "完成擺盤",
   serve: "請客人吃",
   done: "完成啦",
 };
@@ -34,6 +41,7 @@ const prompts: Record<Stage, string> = {
   rinse: "用手指繞圈圈洗白米。",
   mix: "把白米和地瓜拖進鍋子裡。",
   cook: "按下大大的煮飯按鈕。",
+  decorate: "看看點餐內容，選出客人想要的配料。",
   serve: "選一位客人，請他吃地瓜飯。",
   done: "好香的地瓜飯，你是最棒的小廚師！",
 };
@@ -52,6 +60,7 @@ const voiceFiles: Record<string, string> = {
   "把白米和地瓜拖進鍋子裡。": "mix",
   "把白飯和地瓜都放進鍋子裡。": "mix",
   "按下大大的煮飯按鈕。": "cook",
+  "看看點餐內容，選出客人想要的配料。": "serve",
   "選一位客人，請他吃地瓜飯。": "serve",
   "好香的地瓜飯，你是最棒的小廚師！": "done",
   "找到第1條地瓜！": "found1",
@@ -146,9 +155,12 @@ export default function Home() {
   const [timer, setTimer] = useState(3);
   const [guest, setGuest] = useState("");
   const [orderGuest, setOrderGuest] = useState(["小熊", "🐻"]);
+  const [orderTopping, setOrderTopping] = useState<Topping>(toppings[0]);
+  const [chosenTopping, setChosenTopping] = useState<Topping | null>(null);
   const [recipe, setRecipe] = useState<Recipe>(recipes[0]);
   const [difficulty, setDifficulty] = useState<"easy" | "challenge">("easy");
   const [parentOpen, setParentOpen] = useState(false);
+  const [stickerBookOpen, setStickerBookOpen] = useState(false);
   const [stickers, setStickers] = useState<Record<string, number>>(() => {
     if (typeof window === "undefined") return {};
     const saved = window.localStorage.getItem("sweet-potato-stickers");
@@ -226,6 +238,7 @@ export default function Home() {
 
   function reset() {
     setFound([]); setWashed(0); setCut(0); setRinsed(0); setFood([]); setTimer(3); setGuest("");
+    setChosenTopping(null);
     setLearningMessage("");
     awarded.current = false;
     go("home");
@@ -243,6 +256,9 @@ export default function Home() {
 
   function chooseRecipe(nextRecipe: Recipe) {
     setRecipe(nextRecipe);
+    const random = new Uint32Array(1);
+    window.crypto.getRandomValues(random);
+    setOrderTopping(toppings[random[0] % toppings.length]);
     ping();
     go("order");
   }
@@ -381,9 +397,21 @@ export default function Home() {
       ping(value === 0);
       if (value === 0) {
         speak("叮！地瓜飯煮好囉！", sound);
-        setTimeout(() => setStage("serve"), 900);
+        setTimeout(() => setStage("decorate"), 900);
       }
     }, 850 * (index + 1)));
+  }
+
+  function chooseTopping(topping: Topping) {
+    if (topping.id !== orderTopping.id) {
+      setLearningMessage(`客人想要的是${orderTopping.name}，再找找看！`);
+      ping();
+      return;
+    }
+    setLearningMessage("");
+    setChosenTopping(topping);
+    ping(true);
+    setTimeout(() => go("serve"), 850);
   }
 
   function serve(name: string) {
@@ -441,6 +469,10 @@ export default function Home() {
             <h1>地瓜飯<br />小廚師</h1>
             <p>找一找・洗一洗・煮香香</p>
             <button className="big start" onClick={startGame}>▶ 開始玩</button>
+            <button className="sticker-book-button" onClick={() => setStickerBookOpen(true)}>
+              📒 我的貼紙簿
+              <strong>{Object.values(stickers).reduce((sum, count) => sum + count, 0)}</strong>
+            </button>
           </div>
         )}
 
@@ -487,7 +519,10 @@ export default function Home() {
         {stage === "order" && (
           <div className="scene order-scene">
             <div className="order-guest"><span>{orderGuest[1]}</span><b>{orderGuest[0]}</b></div>
-            <div className="speech-bubble">我想吃香香的<br /><strong>{recipe.name}飯！</strong></div>
+            <div className="speech-bubble">
+              我想吃香香的<br /><strong>{recipe.name}飯！</strong><br />
+              再加一點 <em>{orderTopping.emoji} {orderTopping.name}</em>
+            </div>
             <button className="big" onClick={() => go("find")}>收到！開始做</button>
           </div>
         )}
@@ -626,11 +661,31 @@ export default function Home() {
 
         {stage === "serve" && (
           <div className="scene serve-scene">
-            <div className="meal">🍚<span style={{ filter: `drop-shadow(0 0 7px ${recipe.color})` }}>🍠</span></div>
+            <div className="meal">🍚<span style={{ filter: `drop-shadow(0 0 7px ${recipe.color})` }}>🍠</span>{chosenTopping && <i>{chosenTopping.emoji}</i>}</div>
             <p className="hint">把地瓜飯送給點餐的客人</p>
             <button className={`guest ${guest ? "chosen" : ""}`} onClick={() => serve(orderGuest[0])}>
               <span>{orderGuest[1]}</span><b>{orderGuest[0]}</b>
             </button>
+          </div>
+        )}
+
+        {stage === "decorate" && (
+          <div className="scene decorate-scene">
+            <div className="order-reminder">
+              {orderGuest[1]} 想要 <strong>{orderTopping.emoji} {orderTopping.name}</strong>
+            </div>
+            <div className="decorate-meal">
+              🍚<span>🍠</span>{chosenTopping && <i>{chosenTopping.emoji}</i>}
+            </div>
+            <p className="hint">選出正確的配料</p>
+            <div className="topping-list">
+              {toppings.map(topping => (
+                <button key={topping.id} onClick={() => chooseTopping(topping)}>
+                  <span>{topping.emoji}</span><b>{topping.name}</b>
+                </button>
+              ))}
+            </div>
+            {learningMessage && <div className="coach-message">💡 {learningMessage}</div>}
           </div>
         )}
 
@@ -640,13 +695,39 @@ export default function Home() {
             <span className="star">⭐</span>
             <h1>地瓜飯完成啦！</h1>
             <div className="friends">{orderGuest[1]}</div>
-            <div className="meal">🍚<span style={{ filter: `drop-shadow(0 0 7px ${recipe.color})` }}>🍠</span></div>
+            <div className="meal">🍚<span style={{ filter: `drop-shadow(0 0 7px ${recipe.color})` }}>🍠</span>{chosenTopping && <i>{chosenTopping.emoji}</i>}</div>
             <p>你是最棒的小廚師！</p>
             <div className="sticker"><span>{recipe.sticker}</span><b>獲得「{recipe.name}」貼紙！</b></div>
             <button className="big" onClick={reset}>↻ 再玩一次</button>
           </div>
         )}
       </section>
+      {stickerBookOpen && (
+        <div className="sticker-overlay" role="dialog" aria-modal="true" aria-label="我的貼紙簿">
+          <div className="sticker-panel">
+            <button className="close-parent" onClick={() => setStickerBookOpen(false)}>✕</button>
+            <h2>📒 我的地瓜貼紙簿</h2>
+            <p>每完成一次料理，就能收藏一張貼紙！</p>
+            <div className="sticker-pages">
+              {recipes.map(item => {
+                const count = stickers[item.id] || 0;
+                return (
+                  <article className={count ? "collected" : "empty"} key={item.id}>
+                    <span>{count ? item.sticker : "？"}</span>
+                    <b>{item.name}</b>
+                    <small>{count ? `已收藏 ${count} 張` : "還沒收集到"}</small>
+                    <div>{Array.from({ length: 3 }).map((_, index) => <i key={index}>{index < count ? "★" : "☆"}</i>)}</div>
+                  </article>
+                );
+              })}
+            </div>
+            <div className="collection-progress">
+              收藏進度 <strong>{Object.keys(stickers).filter(key => stickers[key] > 0).length} / {recipes.length}</strong>
+            </div>
+            <button className="parent-done" onClick={() => setStickerBookOpen(false)}>繼續玩</button>
+          </div>
+        </div>
+      )}
       {parentOpen && (
         <div className="parent-overlay" role="dialog" aria-modal="true" aria-label="家長設定">
           <div className="parent-panel">
