@@ -45,6 +45,20 @@ const prompts: Record<Stage, string> = {
   serve: "選一位客人，請他吃地瓜飯。",
   done: "好香的地瓜飯，你是最棒的小廚師！",
 };
+const taiwanesePrompts: Record<Stage, string> = {
+  home: "歡迎來做番薯飯，揤開始來𨑨迌。",
+  choose: "揀一款你今仔日想欲煮的番薯。",
+  order: "人客想欲食芳芳的番薯飯，準備好就開始。",
+  find: "揣看覓，三條番薯囥佇佗位？",
+  wash: "用手指共番薯捽予清氣。",
+  cut: "順紲虛線共番薯切做細箍。",
+  rinse: "用手指畫輾轉來洗米。",
+  mix: "共米佮番薯囥入去鍋仔。",
+  cook: "揤落大粒的煮飯鈕。",
+  decorate: "揀人客想欲食的配料。",
+  serve: "共番薯飯送予人客。",
+  done: "足芳的番薯飯，你是上𠢕的小廚師。",
+};
 
 let activeVoice: HTMLAudioElement | null = null;
 
@@ -81,31 +95,37 @@ function voiceFileFor(text: string) {
   return voiceFiles[text];
 }
 
-function deviceSpeech(text: string) {
+function deviceSpeech(text: string, lang = "zh-TW") {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   const engine = window.speechSynthesis;
   engine.cancel();
   engine.resume();
   const line = new SpeechSynthesisUtterance(text);
   const voices = engine.getVoices();
+  const wanted = lang.toLowerCase();
   const voice =
+    voices.find(item => item.lang.toLowerCase() === wanted) ||
     voices.find(item => item.lang.toLowerCase() === "zh-tw") ||
     voices.find(item => item.lang.toLowerCase() === "zh-hk") ||
     voices.find(item => item.lang.toLowerCase() === "zh-cn") ||
     voices.find(item => item.lang.toLowerCase().startsWith("zh"));
   if (voice) line.voice = voice;
-  line.lang = voice?.lang || "zh-TW";
+  line.lang = voice?.lang || lang;
   line.volume = 1;
   line.rate = 0.84;
   line.pitch = 1.12;
   engine.speak(line);
 }
 
-function speak(text: string, enabled = true) {
+function speak(text: string, enabled = true, language: "mandarin" | "taiwanese" = "mandarin") {
   if (!enabled || typeof window === "undefined") return;
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   activeVoice?.pause();
 
+  if (language === "taiwanese") {
+    deviceSpeech(text, "nan-TW");
+    return;
+  }
   const file = voiceFileFor(text);
   if (!file) {
     deviceSpeech(text);
@@ -159,6 +179,10 @@ export default function Home() {
   const [chosenTopping, setChosenTopping] = useState<Topping | null>(null);
   const [recipe, setRecipe] = useState<Recipe>(recipes[0]);
   const [difficulty, setDifficulty] = useState<"easy" | "challenge">("easy");
+  const [gameMode, setGameMode] = useState<"quick" | "full">("quick");
+  const [language, setLanguage] = useState<"mandarin" | "taiwanese">("mandarin");
+  const [outfit, setOutfit] = useState("白色廚師帽");
+  const [outfitOpen, setOutfitOpen] = useState(false);
   const [parentOpen, setParentOpen] = useState(false);
   const [stickerBookOpen, setStickerBookOpen] = useState(false);
   const [stickers, setStickers] = useState<Record<string, number>>(() => {
@@ -199,9 +223,10 @@ export default function Home() {
 
   useEffect(() => {
     if (stage === "home") return;
-    const id = window.setTimeout(() => speak(prompts[stage], sound), 250);
+    const text = language === "taiwanese" ? taiwanesePrompts[stage] : prompts[stage];
+    const id = window.setTimeout(() => speak(text, sound, language), 250);
     return () => clearTimeout(id);
-  }, [stage, sound]);
+  }, [stage, sound, language]);
 
   function unlockSound() {
     if (!sound) return null;
@@ -245,20 +270,23 @@ export default function Home() {
   }
 
   function startGame() {
-    const guests = [["小熊", "🐻"], ["小兔", "🐰"], ["小狗", "🐶"]];
+    const guests = [
+      { guest: ["小熊", "🐻"], topping: toppings[0] },
+      { guest: ["小兔", "🐰"], topping: toppings[1] },
+      { guest: ["小狗", "🐶"], topping: toppings[2] },
+    ];
     const random = new Uint32Array(1);
     window.crypto.getRandomValues(random);
-    setOrderGuest(guests[random[0] % guests.length]);
+    const order = guests[random[0] % guests.length];
+    setOrderGuest(order.guest);
+    setOrderTopping(order.topping);
     unlockSound();
-    speak("開始做地瓜飯！", sound);
+    speak(language === "taiwanese" ? "開始來做番薯飯。" : "開始做地瓜飯！", sound, language);
     go("choose");
   }
 
   function chooseRecipe(nextRecipe: Recipe) {
     setRecipe(nextRecipe);
-    const random = new Uint32Array(1);
-    window.crypto.getRandomValues(random);
-    setOrderTopping(toppings[random[0] % toppings.length]);
     ping();
     go("order");
   }
@@ -307,6 +335,16 @@ export default function Home() {
     washing.current = false;
   }
 
+  function tapWash() {
+    const next = Math.min(100, washed + 25);
+    setWashed(next);
+    ping();
+    if (next >= 100) {
+      speak("洗得亮晶晶！", sound, language);
+      setTimeout(() => go("cut"), 700);
+    }
+  }
+
   function startCut(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
     cutStart.current = { x: event.clientX, y: event.clientY };
@@ -323,7 +361,26 @@ export default function Home() {
     ping();
     speak(next === 3 ? "切好了，變成小方塊！" : `切一刀！還有${3 - next}刀。`, sound);
     if (next === 3) {
-      setTimeout(() => go("rinse"), 1200);
+      if (gameMode === "quick") {
+        setFood(["rice", "potato"]);
+        setTimeout(() => go("cook"), 1200);
+      } else {
+        setTimeout(() => go("rinse"), 1200);
+      }
+    }
+  }
+
+  function tapCut() {
+    const next = Math.min(cut + 1, 3);
+    setCut(next);
+    ping();
+    if (next === 3) {
+      if (gameMode === "quick") {
+        setFood(["rice", "potato"]);
+        setTimeout(() => go("cook"), 800);
+      } else {
+        setTimeout(() => go("rinse"), 800);
+      }
     }
   }
 
@@ -420,7 +477,12 @@ export default function Home() {
     setTimeout(() => setStage("done"), 1200);
   }
 
-  const step = stages.indexOf(stage);
+  const activeStages = gameMode === "quick"
+    ? stages.filter(item => !["rinse", "mix"].includes(item))
+    : stages;
+  const step = activeStages.indexOf(stage);
+  const stickerTotal = Object.values(stickers).reduce((sum, count) => sum + count, 0);
+  const hatEmoji = outfit === "皇冠廚師帽" ? "👑" : outfit === "紫色廚師帽" ? "🎩" : "☁";
 
   return (
     <main className={`game ${stage} ${difficulty}`} onPointerDownCapture={unlockSound}>
@@ -440,7 +502,10 @@ export default function Home() {
             onClick={() => {
               const next = !sound;
               setSound(next);
-              if (next) setTimeout(() => speak(prompts[stage]), 30);
+              if (next) {
+                const text = language === "taiwanese" ? taiwanesePrompts[stage] : prompts[stage];
+                setTimeout(() => speak(text, true, language), 30);
+              }
               else {
                 activeVoice?.pause();
                 window.speechSynthesis?.cancel();
@@ -452,7 +517,7 @@ export default function Home() {
 
       {step >= 0 && (
         <nav aria-label="遊戲進度">
-          {stages.map((item, i) =>
+          {activeStages.map((item, i) =>
             <i className={i < step ? "done" : i === step ? "now" : ""} key={item}>
               {i < step ? "✓" : i + 1}
             </i>
@@ -465,14 +530,22 @@ export default function Home() {
           <div className="home-screen">
             <span className="sun" />
             <span className="cloud c1">☁</span><span className="cloud c2">☁</span>
-            <div className="mascot"><span className="hat">☁</span><Potato clean /></div>
+            <div className="mascot"><span className="hat">{hatEmoji}</span><Potato clean /></div>
             <h1>地瓜飯<br />小廚師</h1>
             <p>找一找・洗一洗・煮香香</p>
+            <div className="home-options">
+              <button className={gameMode === "quick" ? "selected" : ""} onClick={() => setGameMode("quick")}>⚡ 快速料理</button>
+              <button className={gameMode === "full" ? "selected" : ""} onClick={() => setGameMode("full")}>🍳 完整料理</button>
+            </div>
+            <div className="language-switch" aria-label="語音語言">
+              <button className={language === "mandarin" ? "selected" : ""} onClick={() => setLanguage("mandarin")}>國語</button>
+              <button className={language === "taiwanese" ? "selected" : ""} onClick={() => setLanguage("taiwanese")}>台語</button>
+            </div>
             <button className="big start" onClick={startGame}>▶ 開始玩</button>
-            <button className="sticker-book-button" onClick={() => setStickerBookOpen(true)}>
-              📒 我的貼紙簿
-              <strong>{Object.values(stickers).reduce((sum, count) => sum + count, 0)}</strong>
-            </button>
+            <div className="home-secondary">
+              <button className="sticker-book-button" onClick={() => setStickerBookOpen(true)}>📒 我的貼紙簿<strong>{stickerTotal}</strong></button>
+              <button className="outfit-button" onClick={() => setOutfitOpen(true)}>👕 幫小廚師換裝</button>
+            </div>
           </div>
         )}
 
@@ -480,7 +553,16 @@ export default function Home() {
           <div className="heading">
             <b>第 {step + 1} 關</b>
             <h1>{titles[stage]}</h1>
-            <button onClick={() => speak(prompts[stage], sound)}>🔊 再聽一次</button>
+            <button onClick={() => {
+              const text = language === "taiwanese" ? taiwanesePrompts[stage] : prompts[stage];
+              speak(text, sound, language);
+            }}>🔊 再聽一次</button>
+          </div>
+        )}
+
+        {step >= 0 && (
+          <div className="potato-helper" aria-live="polite">
+            <Potato clean tiny /><span>{language === "taiwanese" ? "我來鬥相共！" : "我來幫你！"}</span>
           </div>
         )}
 
@@ -551,6 +633,7 @@ export default function Home() {
             </div>
             <div className="wash-progress" aria-hidden="true"><i style={{ width: `${washed}%` }} /></div>
             <p className="hint">👆 按住地瓜，來回搓洗</p>
+            <button className="easy-action" onClick={tapWash}>點一下也可以洗 🧽</button>
           </div>
         )}
 
@@ -584,6 +667,7 @@ export default function Home() {
               )}
             </div>
             <p className="hint">{cut < 3 ? `👇 在地瓜上往下滑（${cut}/3）` : "地瓜變成方塊啦！"}</p>
+            {cut < 3 && <button className="easy-action" onClick={tapCut}>點一下切一刀</button>}
             <strong className="safe">小朋友不碰真的刀子喔！</strong>
           </div>
         )}
@@ -619,6 +703,7 @@ export default function Home() {
               onPointerMove={moveFoodDrag}
               onPointerUp={finishFoodDrag}
               onPointerCancel={() => setDraggingFood(null)}
+              onClick={() => addFood("rice")}
             >
               <span>🍚</span><b>白米</b>
             </button>
@@ -628,6 +713,7 @@ export default function Home() {
               onPointerMove={moveFoodDrag}
               onPointerUp={finishFoodDrag}
               onPointerCancel={() => setDraggingFood(null)}
+              onClick={() => addFood("potato")}
             >
               <span className="mini-cubes">▰ ▰ ▰</span><b>地瓜塊</b>
             </button>
@@ -702,6 +788,37 @@ export default function Home() {
           </div>
         )}
       </section>
+      {outfitOpen && (
+        <div className="sticker-overlay" role="dialog" aria-modal="true" aria-label="幫小廚師換裝">
+          <div className="outfit-panel">
+            <button className="close-parent" onClick={() => setOutfitOpen(false)}>✕</button>
+            <h2>👕 幫小廚師換裝</h2>
+            <p>收集貼紙可以解鎖新帽子！</p>
+            <div className="outfit-list">
+              {[
+                { name: "白色廚師帽", icon: "☁", need: 0 },
+                { name: "紫色廚師帽", icon: "🎩", need: 2 },
+                { name: "皇冠廚師帽", icon: "👑", need: 5 },
+              ].map(item => {
+                const unlocked = stickerTotal >= item.need;
+                return (
+                  <button
+                    key={item.name}
+                    disabled={!unlocked}
+                    className={outfit === item.name ? "wearing" : ""}
+                    onClick={() => { setOutfit(item.name); ping(true); }}
+                  >
+                    <span>{unlocked ? item.icon : "🔒"}</span>
+                    <b>{item.name}</b>
+                    <small>{unlocked ? (outfit === item.name ? "穿戴中" : "點一下穿上") : `需要 ${item.need} 張貼紙`}</small>
+                  </button>
+                );
+              })}
+            </div>
+            <button className="parent-done" onClick={() => setOutfitOpen(false)}>換裝完成</button>
+          </div>
+        </div>
+      )}
       {stickerBookOpen && (
         <div className="sticker-overlay" role="dialog" aria-modal="true" aria-label="我的貼紙簿">
           <div className="sticker-panel">
@@ -737,6 +854,18 @@ export default function Home() {
               <select value={difficulty} onChange={event => setDifficulty(event.target.value as "easy" | "challenge")}>
                 <option value="easy">輕鬆玩（適合初次）</option>
                 <option value="challenge">小挑戰（大小與順序）</option>
+              </select>
+            </label>
+            <label>料理模式
+              <select value={gameMode} onChange={event => setGameMode(event.target.value as "quick" | "full")}>
+                <option value="quick">快速料理（約 3 分鐘）</option>
+                <option value="full">完整料理（約 5–7 分鐘）</option>
+              </select>
+            </label>
+            <label>語音語言
+              <select value={language} onChange={event => setLanguage(event.target.value as "mandarin" | "taiwanese")}>
+                <option value="mandarin">國語</option>
+                <option value="taiwanese">台語</option>
               </select>
             </label>
             <h3>貼紙收藏</h3>
