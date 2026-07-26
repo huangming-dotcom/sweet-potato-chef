@@ -2,14 +2,16 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
-type Stage = "home" | "find" | "wash" | "cut" | "mix" | "cook" | "serve" | "done";
+type Stage = "home" | "order" | "find" | "wash" | "cut" | "rinse" | "mix" | "cook" | "serve" | "done";
 
-const stages: Stage[] = ["find", "wash", "cut", "mix", "cook", "serve"];
+const stages: Stage[] = ["order", "find", "wash", "cut", "rinse", "mix", "cook", "serve"];
 const titles: Record<Stage, string> = {
   home: "地瓜飯小廚師",
+  order: "接到點餐",
   find: "找地瓜",
   wash: "洗一洗",
   cut: "變小塊",
+  rinse: "洗白米",
   mix: "放進鍋",
   cook: "煮飯飯",
   serve: "請客人吃",
@@ -17,10 +19,12 @@ const titles: Record<Stage, string> = {
 };
 const prompts: Record<Stage, string> = {
   home: "歡迎來到地瓜飯小廚師，按下開始玩。",
+  order: "客人想吃香香的地瓜飯，準備好了就開始吧。",
   find: "找一找，三條地瓜藏在哪裡？",
   wash: "用手指在地瓜上來回搓一搓，把泥巴洗乾淨。",
   cut: "用手指沿著虛線往下切，把地瓜切成小方塊。",
-  mix: "把白飯和地瓜都放進鍋子裡。",
+  rinse: "用手指繞圈圈洗白米。",
+  mix: "把白米和地瓜拖進鍋子裡。",
   cook: "按下大大的煮飯按鈕。",
   serve: "選一位客人，請他吃地瓜飯。",
   done: "好香的地瓜飯，你是最棒的小廚師！",
@@ -31,9 +35,12 @@ let activeVoice: HTMLAudioElement | null = null;
 const voiceFiles: Record<string, string> = {
   "歡迎來到地瓜飯小廚師，按下開始玩。": "start",
   "開始做地瓜飯！": "start",
+  "客人想吃香香的地瓜飯，準備好了就開始吧。": "serve",
   "找一找，三條地瓜藏在哪裡？": "find",
   "用手指在地瓜上來回搓一搓，把泥巴洗乾淨。": "wash",
   "用手指沿著虛線往下切，把地瓜切成小方塊。": "cut",
+  "用手指繞圈圈洗白米。": "wash",
+  "把白米和地瓜拖進鍋子裡。": "mix",
   "把白飯和地瓜都放進鍋子裡。": "mix",
   "按下大大的煮飯按鈕。": "cook",
   "選一位客人，請他吃地瓜飯。": "serve",
@@ -125,12 +132,17 @@ export default function Home() {
   const [found, setFound] = useState<number[]>([]);
   const [washed, setWashed] = useState(0);
   const [cut, setCut] = useState(0);
+  const [rinsed, setRinsed] = useState(0);
   const [food, setFood] = useState<string[]>([]);
   const [timer, setTimer] = useState(3);
   const [guest, setGuest] = useState("");
+  const [orderGuest, setOrderGuest] = useState(["小熊", "🐻"]);
+  const [draggingFood, setDraggingFood] = useState<{ item: string; x: number; y: number } | null>(null);
   const washing = useRef(false);
   const washPoint = useRef({ x: 0, y: 0 });
   const cutStart = useRef<{ x: number; y: number } | null>(null);
+  const rinsePoint = useRef<{ x: number; y: number } | null>(null);
+  const potRef = useRef<HTMLDivElement | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
 
   useEffect(() => {
@@ -183,8 +195,18 @@ export default function Home() {
   }
 
   function reset() {
-    setFound([]); setWashed(0); setCut(0); setFood([]); setTimer(3); setGuest("");
+    setFound([]); setWashed(0); setCut(0); setRinsed(0); setFood([]); setTimer(3); setGuest("");
     go("home");
+  }
+
+  function startGame() {
+    const guests = [["小熊", "🐻"], ["小兔", "🐰"], ["小狗", "🐶"]];
+    const random = new Uint32Array(1);
+    window.crypto.getRandomValues(random);
+    setOrderGuest(guests[random[0] % guests.length]);
+    unlockSound();
+    speak("開始做地瓜飯！", sound);
+    go("order");
   }
 
   function findPotato(id: number) {
@@ -240,7 +262,29 @@ export default function Home() {
     ping();
     speak(next === 3 ? "切好了，變成小方塊！" : `切一刀！還有${3 - next}刀。`, sound);
     if (next === 3) {
-      setTimeout(() => go("mix"), 1200);
+      setTimeout(() => go("rinse"), 1200);
+    }
+  }
+
+  function startRinse(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    rinsePoint.current = { x: event.clientX, y: event.clientY };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveRinse(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!rinsePoint.current || rinsed >= 100) return;
+    event.preventDefault();
+    const distance = Math.hypot(event.clientX - rinsePoint.current.x, event.clientY - rinsePoint.current.y);
+    if (distance < 4) return;
+    rinsePoint.current = { x: event.clientX, y: event.clientY };
+    const next = Math.min(100, rinsed + distance * .3);
+    setRinsed(next);
+    if (Math.floor(next / 20) > Math.floor(rinsed / 20)) ping();
+    if (next >= 100) {
+      rinsePoint.current = null;
+      speak("洗得亮晶晶！", sound);
+      setTimeout(() => go("mix"), 900);
     }
   }
 
@@ -250,6 +294,32 @@ export default function Home() {
     setFood(next); ping();
     speak(item === "rice" ? "白飯進鍋！" : "地瓜進鍋！", sound);
     if (next.length === 2) setTimeout(() => go("cook"), 750);
+  }
+
+  function startFoodDrag(item: string, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (food.includes(item)) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingFood({ item, x: event.clientX, y: event.clientY });
+  }
+
+  function moveFoodDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!draggingFood) return;
+    event.preventDefault();
+    setDraggingFood(current => current ? { ...current, x: event.clientX, y: event.clientY } : null);
+  }
+
+  function finishFoodDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!draggingFood) return;
+    event.preventDefault();
+    const rect = potRef.current?.getBoundingClientRect();
+    const dropped = rect &&
+      event.clientX >= rect.left - 30 && event.clientX <= rect.right + 30 &&
+      event.clientY >= rect.top - 30 && event.clientY <= rect.bottom + 30;
+    const item = draggingFood.item;
+    setDraggingFood(null);
+    if (dropped) addFood(item);
+    else ping();
   }
 
   function cookRice() {
@@ -310,11 +380,7 @@ export default function Home() {
             <div className="mascot"><span className="hat">☁</span><Potato clean /></div>
             <h1>地瓜飯<br />小廚師</h1>
             <p>找一找・洗一洗・煮香香</p>
-            <button className="big start" onClick={() => {
-              unlockSound();
-              speak("開始做地瓜飯！", sound);
-              go("find");
-            }}>▶ 開始玩</button>
+            <button className="big start" onClick={startGame}>▶ 開始玩</button>
           </div>
         )}
 
@@ -338,6 +404,14 @@ export default function Home() {
                 onClick={() => findPotato(id)}
               ><Potato /></button>
             )}
+          </div>
+        )}
+
+        {stage === "order" && (
+          <div className="scene order-scene">
+            <div className="order-guest"><span>{orderGuest[1]}</span><b>{orderGuest[0]}</b></div>
+            <div className="speech-bubble">我想吃香香的<br /><strong>地瓜飯！</strong></div>
+            <button className="big" onClick={() => go("find")}>收到！開始做</button>
           </div>
         )}
 
@@ -402,21 +476,61 @@ export default function Home() {
           </div>
         )}
 
+        {stage === "rinse" && (
+          <div className="scene rinse-scene">
+            <div
+              className="rice-bowl"
+              role="slider"
+              aria-label="繞圈清洗白米"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(rinsed)}
+              onPointerDown={startRinse}
+              onPointerMove={moveRinse}
+              onPointerUp={() => { rinsePoint.current = null; }}
+              onPointerCancel={() => { rinsePoint.current = null; }}
+            >
+              <div className="rice-water" style={{ opacity: .9 - rinsed * .005 }} />
+              <span className="rice-grains">••••••••••<br />•••••••••</span>
+              <span className="circle-guide">↻</span>
+            </div>
+            <div className="wash-progress" aria-hidden="true"><i style={{ width: `${rinsed}%` }} /></div>
+            <p className="hint">☝️ 在白米上繞圈圈（{Math.round(rinsed)}%）</p>
+          </div>
+        )}
+
         {stage === "mix" && (
           <div className="scene mix-scene">
-            <button className={`food ${food.includes("rice") ? "added" : ""}`} onClick={() => addFood("rice")}>
-              <span>🍚</span><b>白飯</b>
+            <button
+              className={`food ${food.includes("rice") ? "added" : ""}`}
+              onPointerDown={event => startFoodDrag("rice", event)}
+              onPointerMove={moveFoodDrag}
+              onPointerUp={finishFoodDrag}
+              onPointerCancel={() => setDraggingFood(null)}
+            >
+              <span>🍚</span><b>白米</b>
             </button>
-            <button className={`food ${food.includes("potato") ? "added" : ""}`} onClick={() => addFood("potato")}>
-              <span>🍠</span><b>地瓜</b>
+            <button
+              className={`food ${food.includes("potato") ? "added" : ""}`}
+              onPointerDown={event => startFoodDrag("potato", event)}
+              onPointerMove={moveFoodDrag}
+              onPointerUp={finishFoodDrag}
+              onPointerCancel={() => setDraggingFood(null)}
+            >
+              <span className="mini-cubes">▰ ▰ ▰</span><b>地瓜塊</b>
             </button>
-            <div className="cooker">
+            <div className="cooker" ref={potRef}>
               <i className="lid" /><div className="pot">
                 {food.includes("rice") && <span>🍚</span>}
-                {food.includes("potato") && <span>🍠</span>}
+                {food.includes("potato") && <span className="pot-cubes">▪▪▪</span>}
               </div>
             </div>
-            <p className="hint">兩樣都點一下</p>
+            {draggingFood && (
+              <span className="drag-ghost" style={{ left: draggingFood.x, top: draggingFood.y }}>
+                {draggingFood.item === "rice" ? "🍚" : "▰"}
+              </span>
+            )}
+            <p className="hint">👆 按住食材，拖進鍋子</p>
           </div>
         )}
 
@@ -435,14 +549,10 @@ export default function Home() {
         {stage === "serve" && (
           <div className="scene serve-scene">
             <div className="meal">🍚<span>🍠</span></div>
-            <p className="hint">誰要吃地瓜飯？</p>
-            <div className="guests">
-              {[["小熊","🐻"],["小兔","🐰"],["小狗","🐶"]].map(([name, emoji]) =>
-                <button className={`guest ${guest === name ? "chosen" : ""}`} key={name} onClick={() => serve(name)}>
-                  <span>{emoji}</span><b>{name}</b>
-                </button>
-              )}
-            </div>
+            <p className="hint">把地瓜飯送給點餐的客人</p>
+            <button className={`guest ${guest ? "chosen" : ""}`} onClick={() => serve(orderGuest[0])}>
+              <span>{orderGuest[1]}</span><b>{orderGuest[0]}</b>
+            </button>
           </div>
         )}
 
@@ -451,9 +561,10 @@ export default function Home() {
             <div className="confetti">{Array.from({length: 18}).map((_,i) => <i key={i} />)}</div>
             <span className="star">⭐</span>
             <h1>地瓜飯完成啦！</h1>
-            <div className="friends">🐻 🐰 🐶</div>
+            <div className="friends">{orderGuest[1]}</div>
             <div className="meal">🍚<span>🍠</span></div>
             <p>你是最棒的小廚師！</p>
+            <div className="sticker"><span>🍠</span><b>獲得「亮晶晶地瓜」貼紙！</b></div>
             <button className="big" onClick={reset}>↻ 再玩一次</button>
           </div>
         )}
