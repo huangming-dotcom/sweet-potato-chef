@@ -28,6 +28,34 @@ const prompts: Record<Stage, string> = {
 
 let activeVoice: HTMLAudioElement | null = null;
 
+const voiceFiles: Record<string, string> = {
+  "歡迎來到地瓜飯小廚師，按下開始玩。": "start",
+  "開始做地瓜飯！": "start",
+  "找一找，三條地瓜藏在哪裡？": "find",
+  "用手指在地瓜上來回搓一搓，把泥巴洗乾淨。": "wash",
+  "用手指沿著虛線往下切，把地瓜切成小方塊。": "cut",
+  "把白飯和地瓜都放進鍋子裡。": "mix",
+  "按下大大的煮飯按鈕。": "cook",
+  "選一位客人，請他吃地瓜飯。": "serve",
+  "好香的地瓜飯，你是最棒的小廚師！": "done",
+  "找到第1條地瓜！": "found1",
+  "找到第2條地瓜！": "found2",
+  "三條地瓜都找到啦！": "found3",
+  "洗得亮晶晶！": "washDone",
+  "切一刀！還有2刀。": "cut1",
+  "切一刀！還有1刀。": "cut2",
+  "切好了，變成小方塊！": "cutDone",
+  "白飯進鍋！": "rice",
+  "地瓜進鍋！": "potato",
+  "三、二、一，地瓜飯快快熟！": "cookStart",
+  "叮！地瓜飯煮好囉！": "cookDone",
+};
+
+function voiceFileFor(text: string) {
+  if (text.includes("說，好香、好好吃，謝謝小廚師！")) return "guest";
+  return voiceFiles[text];
+}
+
 function deviceSpeech(text: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   const engine = window.speechSynthesis;
@@ -53,12 +81,14 @@ function speak(text: string, enabled = true) {
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   activeVoice?.pause();
 
-  const naturalVoiceUrl =
-    `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=zh-TW&q=${encodeURIComponent(text)}`;
-  const audio = new Audio(naturalVoiceUrl);
+  const file = voiceFileFor(text);
+  if (!file) {
+    deviceSpeech(text);
+    return;
+  }
+  const audio = new Audio(`/voice/${file}.mp3`);
   audio.preload = "auto";
   audio.setAttribute("playsinline", "");
-  audio.setAttribute("referrerpolicy", "no-referrer");
   audio.volume = 1;
   activeVoice = audio;
   let fellBack = false;
