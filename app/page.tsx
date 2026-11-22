@@ -5,6 +5,8 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 type Stage = "home" | "choose" | "order" | "find" | "wash" | "cut" | "rinse" | "mix" | "cook" | "decorate" | "serve" | "done";
 type Recipe = { id: string; name: string; color: string; sticker: string };
 type Topping = { id: string; name: string; emoji: string };
+type Guest = { name: string; emoji: string; line: string };
+type Outfit = { name: string; icon: string; need: number };
 
 const stages: Stage[] = ["choose", "order", "find", "wash", "cut", "rinse", "mix", "cook", "decorate", "serve"];
 const recipes: Recipe[] = [
@@ -16,7 +18,40 @@ const toppings: Topping[] = [
   { id: "corn", name: "玉米", emoji: "🌽" },
   { id: "carrot", name: "紅蘿蔔", emoji: "🥕" },
   { id: "mushroom", name: "香菇", emoji: "🍄" },
+  { id: "edamame", name: "毛豆", emoji: "🫛" },
+  { id: "pumpkin", name: "南瓜", emoji: "🎃" },
+  { id: "egg", name: "滷蛋", emoji: "🥚" },
+  { id: "broccoli", name: "青花菜", emoji: "🥦" },
 ];
+const guests: Guest[] = [
+  { name: "小熊", emoji: "🐻", line: "我今天肚子咕嚕咕嚕！" },
+  { name: "小兔", emoji: "🐰", line: "我想吃香香甜甜的飯！" },
+  { name: "小狗", emoji: "🐶", line: "汪！我帶著好胃口來了！" },
+  { name: "小貓", emoji: "🐱", line: "喵～請幫我做漂亮的地瓜飯！" },
+  { name: "小狐狸", emoji: "🦊", line: "我最會找好吃的料理了！" },
+  { name: "小象", emoji: "🐘", line: "我想要一大碗健康的飯！" },
+  { name: "阿公", emoji: "👴", line: "慢慢做、用心做，就是好料理。" },
+  { name: "阿嬤", emoji: "👵", line: "我最喜歡小廚師做的飯！" },
+];
+const outfits: Outfit[] = [
+  { name: "白色廚師帽", icon: "☁", need: 0 },
+  { name: "紫色廚師帽", icon: "🎩", need: 2 },
+  { name: "地瓜葉帽", icon: "🌿", need: 4 },
+  { name: "南瓜帽", icon: "🎃", need: 6 },
+  { name: "星星廚師帽", icon: "🌟", need: 8 },
+  { name: "皇冠廚師帽", icon: "👑", need: 10 },
+];
+const celebrationLines = ["客人開心地跳起舞！", "飯鍋冒出了愛心蒸氣！", "大家一起和料理拍照！", "香味飄到整座地瓜村！"];
+
+function readSaved<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const value = window.localStorage.getItem(key);
+    return value ? JSON.parse(value) as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
 const titles: Record<Stage, string> = {
   home: "地瓜飯小廚師",
   choose: "選地瓜",
@@ -174,23 +209,23 @@ export default function Home() {
   const [food, setFood] = useState<string[]>([]);
   const [timer, setTimer] = useState(3);
   const [guest, setGuest] = useState("");
-  const [orderGuest, setOrderGuest] = useState(["小熊", "🐻"]);
+  const [orderGuest, setOrderGuest] = useState<Guest>(guests[0]);
   const [orderTopping, setOrderTopping] = useState<Topping>(toppings[0]);
   const [chosenTopping, setChosenTopping] = useState<Topping | null>(null);
   const [recipe, setRecipe] = useState<Recipe>(recipes[0]);
-  const [difficulty, setDifficulty] = useState<"easy" | "challenge">("easy");
-  const [gameMode, setGameMode] = useState<"quick" | "full">("quick");
-  const [language, setLanguage] = useState<"mandarin" | "taiwanese">("mandarin");
-  const [outfit, setOutfit] = useState("白色廚師帽");
+  const [difficulty, setDifficulty] = useState<"easy" | "challenge">(() => readSaved("sweet-potato-difficulty", "easy"));
+  const [gameMode, setGameMode] = useState<"quick" | "full">(() => readSaved("sweet-potato-mode", "quick"));
+  const [language, setLanguage] = useState<"mandarin" | "taiwanese">(() => readSaved("sweet-potato-language", "mandarin"));
+  const [outfit, setOutfit] = useState(() => readSaved("sweet-potato-outfit", "白色廚師帽"));
   const [outfitOpen, setOutfitOpen] = useState(false);
   const [parentOpen, setParentOpen] = useState(false);
+  const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [stickerBookOpen, setStickerBookOpen] = useState(false);
-  const [stickers, setStickers] = useState<Record<string, number>>(() => {
-    if (typeof window === "undefined") return {};
-    const saved = window.localStorage.getItem("sweet-potato-stickers");
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [stickers, setStickers] = useState<Record<string, number>>(() => readSaved("sweet-potato-stickers", {}));
+  const [awardedCount, setAwardedCount] = useState(0);
   const [learningMessage, setLearningMessage] = useState("");
+  const [holdingParent, setHoldingParent] = useState(false);
+  const [celebration, setCelebration] = useState(celebrationLines[0]);
   const [draggingFood, setDraggingFood] = useState<{ item: string; x: number; y: number } | null>(null);
   const washing = useRef(false);
   const washPoint = useRef({ x: 0, y: 0 });
@@ -199,7 +234,15 @@ export default function Home() {
   const potRef = useRef<HTMLDivElement | null>(null);
   const parentHold = useRef<number | null>(null);
   const awarded = useRef(false);
+  const stickersRef = useRef(stickers);
   const audioContext = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    window.localStorage.setItem("sweet-potato-difficulty", JSON.stringify(difficulty));
+    window.localStorage.setItem("sweet-potato-mode", JSON.stringify(gameMode));
+    window.localStorage.setItem("sweet-potato-language", JSON.stringify(language));
+    window.localStorage.setItem("sweet-potato-outfit", JSON.stringify(outfit));
+  }, [difficulty, gameMode, language, outfit]);
 
   useEffect(() => {
     if ("speechSynthesis" in window) {
@@ -212,8 +255,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    stickersRef.current = stickers;
+  }, [stickers]);
+
+  useEffect(() => {
     if (stage !== "done" || awarded.current) return;
     awarded.current = true;
+    const nextCount = (stickersRef.current[recipe.id] || 0) + 1;
+    setAwardedCount(nextCount);
     setStickers(current => {
       const next = { ...current, [recipe.id]: (current[recipe.id] || 0) + 1 };
       window.localStorage.setItem("sweet-potato-stickers", JSON.stringify(next));
@@ -265,21 +314,17 @@ export default function Home() {
     setFound([]); setWashed(0); setCut(0); setRinsed(0); setFood([]); setTimer(3); setGuest("");
     setChosenTopping(null);
     setLearningMessage("");
+    setAwardedCount(0);
     awarded.current = false;
     go("home");
   }
 
   function startGame() {
-    const guests = [
-      { guest: ["小熊", "🐻"], topping: toppings[0] },
-      { guest: ["小兔", "🐰"], topping: toppings[1] },
-      { guest: ["小狗", "🐶"], topping: toppings[2] },
-    ];
-    const random = new Uint32Array(1);
+    const random = new Uint32Array(3);
     window.crypto.getRandomValues(random);
-    const order = guests[random[0] % guests.length];
-    setOrderGuest(order.guest);
-    setOrderTopping(order.topping);
+    setOrderGuest(guests[random[0] % guests.length]);
+    setOrderTopping(toppings[random[1] % toppings.length]);
+    setCelebration(celebrationLines[random[2] % celebrationLines.length]);
     unlockSound();
     speak(language === "taiwanese" ? "開始來做番薯飯。" : "開始做地瓜飯！", sound, language);
     go("choose");
@@ -482,19 +527,28 @@ export default function Home() {
     : stages;
   const step = activeStages.indexOf(stage);
   const stickerTotal = Object.values(stickers).reduce((sum, count) => sum + count, 0);
-  const hatEmoji = outfit === "皇冠廚師帽" ? "👑" : outfit === "紫色廚師帽" ? "🎩" : "☁";
+  const hatEmoji = outfits.find(item => item.name === outfit)?.icon || "☁";
+  const recipeCount = stickers[recipe.id] || 0;
+  const displayedRecipeCount = awardedCount || recipeCount;
+  const milestone = displayedRecipeCount >= 10 ? "地瓜大師徽章" : displayedRecipeCount >= 5 ? "金色貼紙" : displayedRecipeCount >= 3 ? "新帽子進度" : displayedRecipeCount >= 2 ? "料理背景框" : "地瓜貼紙";
 
   return (
     <main className={`game ${stage} ${difficulty}`} onPointerDownCapture={unlockSound}>
       <header>
         <div className="logo"><span>🍠</span> 地瓜飯小廚師</div>
         <div className="header-actions">
+          {stage !== "home" && stage !== "done" && (
+            <button className="game-menu-button" aria-label="開啟遊戲選單" onClick={() => setGameMenuOpen(true)}>☰<small>選單</small></button>
+          )}
           <button
-            className="parent-lock"
+            className={`parent-lock ${holdingParent ? "holding" : ""}`}
             aria-label="按住開啟家長設定"
-            onPointerDown={() => { parentHold.current = window.setTimeout(() => setParentOpen(true), 1200); }}
-            onPointerUp={() => { if (parentHold.current) clearTimeout(parentHold.current); }}
-            onPointerCancel={() => { if (parentHold.current) clearTimeout(parentHold.current); }}
+            onPointerDown={() => {
+              setHoldingParent(true);
+              parentHold.current = window.setTimeout(() => { setParentOpen(true); setHoldingParent(false); }, 1200);
+            }}
+            onPointerUp={() => { setHoldingParent(false); if (parentHold.current) clearTimeout(parentHold.current); }}
+            onPointerCancel={() => { setHoldingParent(false); if (parentHold.current) clearTimeout(parentHold.current); }}
           >⚙️<small>按住</small></button>
           <button
             className="sound"
@@ -533,6 +587,7 @@ export default function Home() {
             <div className="mascot"><span className="hat">{hatEmoji}</span><Potato clean /></div>
             <h1>地瓜飯<br />小廚師</h1>
             <p>找一找・洗一洗・煮香香</p>
+            <span className="version-badge">v5.2 訂單挑戰版</span>
             <div className="home-options">
               <button className={gameMode === "quick" ? "selected" : ""} onClick={() => setGameMode("quick")}>⚡ 快速料理</button>
               <button className={gameMode === "full" ? "selected" : ""} onClick={() => setGameMode("full")}>🍳 完整料理</button>
@@ -541,6 +596,7 @@ export default function Home() {
               <button className={language === "mandarin" ? "selected" : ""} onClick={() => setLanguage("mandarin")}>國語</button>
               <button className={language === "taiwanese" ? "selected" : ""} onClick={() => setLanguage("taiwanese")}>台語</button>
             </div>
+            <small className="mode-note">{gameMode === "quick" ? "快速料理會自動完成洗米與食材入鍋" : "完整體驗洗米、拖放食材等所有步驟"}</small>
             <button className="big start" onClick={startGame}>▶ 開始玩</button>
             <div className="home-secondary">
               <button className="sticker-book-button" onClick={() => setStickerBookOpen(true)}>📒 我的貼紙簿<strong>{stickerTotal}</strong></button>
@@ -600,7 +656,8 @@ export default function Home() {
 
         {stage === "order" && (
           <div className="scene order-scene">
-            <div className="order-guest"><span>{orderGuest[1]}</span><b>{orderGuest[0]}</b></div>
+            <div className="mission-card"><b>📋 今日小任務</b><span>{difficulty === "challenge" ? "由大到小找地瓜，照順序完成料理" : "記住客人的地瓜與配料，完成專屬料理"}</span></div>
+            <div className="order-guest"><span>{orderGuest.emoji}</span><b>{orderGuest.name}</b><small>{orderGuest.line}</small></div>
             <div className="speech-bubble">
               我想吃香香的<br /><strong>{recipe.name}飯！</strong><br />
               再加一點 <em>{orderTopping.emoji} {orderTopping.name}</em>
@@ -649,6 +706,7 @@ export default function Home() {
                   onPointerDown={startCut}
                   onPointerUp={finishCut}
                   onPointerCancel={() => { cutStart.current = null; }}
+                  onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); tapCut(); } }}
                 >
                   <div className="cut-flesh" />
                   {[0,1,2].map(line => (
@@ -692,6 +750,11 @@ export default function Home() {
             </div>
             <div className="wash-progress" aria-hidden="true"><i style={{ width: `${rinsed}%` }} /></div>
             <p className="hint">☝️ 在白米上繞圈圈（{Math.round(rinsed)}%）</p>
+            <button className="easy-action" onClick={() => {
+              const next = Math.min(100, rinsed + 25);
+              setRinsed(next); ping();
+              if (next >= 100) setTimeout(() => go("mix"), 700);
+            }}>點一下也可以洗米 🍚</button>
           </div>
         )}
 
@@ -748,9 +811,9 @@ export default function Home() {
         {stage === "serve" && (
           <div className="scene serve-scene">
             <div className="meal">🍚<span style={{ filter: `drop-shadow(0 0 7px ${recipe.color})` }}>🍠</span>{chosenTopping && <i>{chosenTopping.emoji}</i>}</div>
-            <p className="hint">把地瓜飯送給點餐的客人</p>
-            <button className={`guest ${guest ? "chosen" : ""}`} onClick={() => serve(orderGuest[0])}>
-              <span>{orderGuest[1]}</span><b>{orderGuest[0]}</b>
+            <p className="hint">把地瓜飯送給 {orderGuest.name}</p>
+            <button className={`guest ${guest ? "chosen" : ""}`} onClick={() => serve(orderGuest.name)}>
+              <span>{orderGuest.emoji}</span><b>{orderGuest.name}</b>
             </button>
           </div>
         )}
@@ -758,7 +821,7 @@ export default function Home() {
         {stage === "decorate" && (
           <div className="scene decorate-scene">
             <div className="order-reminder">
-              {orderGuest[1]} 想要 <strong>{orderTopping.emoji} {orderTopping.name}</strong>
+              {orderGuest.emoji} 想要 <strong>{orderTopping.emoji} {orderTopping.name}</strong>
             </div>
             <div className="decorate-meal">
               🍚<span>🍠</span>{chosenTopping && <i>{chosenTopping.emoji}</i>}
@@ -780,14 +843,27 @@ export default function Home() {
             <div className="confetti">{Array.from({length: 18}).map((_,i) => <i key={i} />)}</div>
             <span className="star">⭐</span>
             <h1>地瓜飯完成啦！</h1>
-            <div className="friends">{orderGuest[1]}</div>
+            <div className="friends">{orderGuest.emoji}</div>
             <div className="meal">🍚<span style={{ filter: `drop-shadow(0 0 7px ${recipe.color})` }}>🍠</span>{chosenTopping && <i>{chosenTopping.emoji}</i>}</div>
-            <p>你是最棒的小廚師！</p>
-            <div className="sticker"><span>{recipe.sticker}</span><b>獲得「{recipe.name}」貼紙！</b></div>
+            <p className="celebration-line">💛 {celebration}</p>
+            <div className="three-stars" aria-label="獲得三星評價"><i>⭐<small>完成料理</small></i><i>⭐<small>符合訂單</small></i><i>⭐<small>安全操作</small></i></div>
+            <div className="sticker"><span>{recipe.sticker}</span><b>獲得「{recipe.name}」貼紙！</b><small>本料理收藏 {displayedRecipeCount} 次・里程碑：{milestone}</small></div>
             <button className="big" onClick={reset}>↻ 再玩一次</button>
           </div>
         )}
       </section>
+      {gameMenuOpen && (
+        <div className="parent-overlay" role="dialog" aria-modal="true" aria-label="遊戲選單">
+          <div className="parent-panel game-menu-panel">
+            <button className="close-parent" onClick={() => setGameMenuOpen(false)}>✕</button>
+            <h2>🍠 遊戲選單</h2>
+            <p>目前進度會保留，選擇要怎麼繼續。</p>
+            <button className="menu-choice" onClick={() => setGameMenuOpen(false)}>▶ 繼續料理</button>
+            <button className="menu-choice" onClick={() => { setGameMenuOpen(false); setStage("order"); }}>↻ 重看訂單</button>
+            <button className="menu-choice home-choice" onClick={() => { setGameMenuOpen(false); reset(); }}>⌂ 回到首頁</button>
+          </div>
+        </div>
+      )}
       {outfitOpen && (
         <div className="sticker-overlay" role="dialog" aria-modal="true" aria-label="幫小廚師換裝">
           <div className="outfit-panel">
@@ -795,11 +871,7 @@ export default function Home() {
             <h2>👕 幫小廚師換裝</h2>
             <p>收集貼紙可以解鎖新帽子！</p>
             <div className="outfit-list">
-              {[
-                { name: "白色廚師帽", icon: "☁", need: 0 },
-                { name: "紫色廚師帽", icon: "🎩", need: 2 },
-                { name: "皇冠廚師帽", icon: "👑", need: 5 },
-              ].map(item => {
+              {outfits.map(item => {
                 const unlocked = stickerTotal >= item.need;
                 return (
                   <button
@@ -833,7 +905,10 @@ export default function Home() {
                     <span>{count ? item.sticker : "？"}</span>
                     <b>{item.name}</b>
                     <small>{count ? `已收藏 ${count} 張` : "還沒收集到"}</small>
-                    <div>{Array.from({ length: 3 }).map((_, index) => <i key={index}>{index < count ? "★" : "☆"}</i>)}</div>
+                    <div className="milestone-row">
+                      {[1, 2, 3, 5, 10].map(value => <i className={count >= value ? "earned" : ""} key={value}>{count >= value ? "★" : "☆"}<small>{value}</small></i>)}
+                    </div>
+                    <em>{count >= 10 ? "地瓜大師" : count >= 5 ? "金色貼紙" : count >= 3 ? "帽子進度" : count >= 2 ? "背景框" : count >= 1 ? "已解鎖貼紙" : "等待解鎖"}</em>
                   </article>
                 );
               })}
