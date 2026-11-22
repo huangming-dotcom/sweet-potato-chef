@@ -166,7 +166,8 @@ function speak(text: string, enabled = true, language: "mandarin" | "taiwanese" 
     deviceSpeech(text);
     return;
   }
-  const audio = new Audio(`/voice/${file}.mp3`);
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  const audio = new Audio(`${basePath}/voice/${file}.mp3`);
   audio.preload = "auto";
   audio.setAttribute("playsinline", "");
   audio.volume = 1;

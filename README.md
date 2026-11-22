@@ -1,5 +1,9 @@
 # 地瓜飯小廚師 v5.2
 
+正式遊戲：<https://huangming-dotcom.github.io/sweet-potato-chef/>
+
+推送到 `main` 後，GitHub Actions 會自動產生靜態版本並發布到 GitHub Pages。
+
 適合親子共同遊玩的料理體驗遊戲。孩子可從挑選地瓜、接收客製訂單、尋找與清洗食材、切塊、洗米、下鍋、擺盤到送餐，完成一套地瓜飯料理流程。
 
 ## v5.2 更新重點
